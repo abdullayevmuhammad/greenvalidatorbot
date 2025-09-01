@@ -1,4 +1,5 @@
 from aiogram import Router
+from .confirm import ask_confirmation
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from states.application import ApplicationForm
@@ -30,8 +31,11 @@ async def handle_children_count(message: Message, state: FSMContext):
                 "photo_file": data.get("photo_file"),
             }
 
-            resp = await post_applicant(data, file_paths)
+            # resp = await post_applicant(data, file_paths)
 
+            await state.update_data(form_data=data, files=file_paths)
+            await ask_confirmation(message, state)
+            return
             if resp.status_code == 201:
                 await message.answer("✅ Arizangiz muvaffaqiyatli yuborildi.")
             else:

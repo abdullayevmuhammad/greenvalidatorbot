@@ -1,11 +1,16 @@
 # handlers/common/start.py
 from aiogram import Router, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import Message, ReplyKeyboardRemove, FSInputFile
 from aiogram.fsm.context import FSMContext
+from aiogram.enums import ChatAction
 
 from keyboards.main_menu import main_menu_kb, MAIN_MENU_BUTTONS
 from states.application import ApplicationForm
+from states.code_request import CodeRequest           # ✅ NEW
+from utils.api import get_confirmation_by_phone       # ✅ NEW
+
+import re, os, tempfile                               # ✅ NEW
 
 router = Router()
 
@@ -57,14 +62,11 @@ Farzandlar soni – agar N > 0 bo‘lsa, har biri uchun ism va pasport/tug‘ilg
 • Turmush o‘rtog‘i – pasport (PDF/JPG/PNG, ≤ 2 MB) va 600×600 surat (fayl sifatida)
 • Farzandlar – ism va pasport/tug‘ilganlik guvohnomasi fayli (PDF/JPG/PNG, ≤ 2 MB)
 
-🧾 Confirmation kod – alohida bo‘lim. Yaqinda telefon raqami orqali tekshiruv ulanadi (hozircha tugma tayyor).
+🧾 Confirmation kod – telefon raqami orqali tekshiruv ulanadi.
 
 ▶️ Boshlash uchun — 📝 Ariza yuborish tugmasini bosing."""
     )
-    await message.answer(
-        text=text,
-        reply_markup=main_menu_kb
-    )
+    await message.answer(text=text, reply_markup=main_menu_kb)
 
 # b) Green Card haqida ma'lumot
 @router.message(F.text == MAIN_MENU_BUTTONS["about_gc"])
@@ -86,33 +88,81 @@ Fotosurat va shaxsiy ma’lumotlar qat’iy talablar bo‘yicha topshiriladi.
 Natijalar odatda keyingi yil may oyida e’lon qilinadi.
 
 ℹ️ Ushbu bot — rasmiy ariza topshirish vositasi emas. U sizning ma’lumotlaringizni tayyorlab, rasmiy talablarga mos formatda jamlaydi."""
-    await message.answer(
-        text=text,
-        reply_markup=main_menu_kb
-    )
+    await message.answer(text=text, reply_markup=main_menu_kb)
 
 # c) Admin bilan bog'lanish
 @router.message(F.text == MAIN_MENU_BUTTONS["contact_admin"])
 async def contact_admin(message: Message):
     await message.answer(
-        "Admin bilan bog'lanish: @your_admin_username\nEmail: admin@example.com\nTelefon: +998 90 000 00 00",
+        "Admin bilan bog'lanish: @Ozoddeee\nTelefon: +998 90 799 79 07",
         reply_markup=main_menu_kb
     )
 
 # d) Ariza yuborish — FSM ni boshlash
 @router.message(F.text == MAIN_MENU_BUTTONS["apply"])
 async def start_application_flow(message: Message, state: FSMContext):
-    # Menyuni vaqtincha yashiramiz, kiritish bosqichi boshlanadi
-    await message.answer(
-        "👤 To‘liq ismingizni kiriting:",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    await message.answer("👤 To‘liq ismingizni kiriting:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(ApplicationForm.full_name)
 
-# e) Confirmation kodni olish (placeholder)
+# e) 🔐 Confirmation kodni olish — TELEFON so'rash (PLACEHOLDER o'rniga)
 @router.message(F.text == MAIN_MENU_BUTTONS["get_code"])
-async def get_confirmation_code(message: Message):
+async def ask_phone(message: Message, state: FSMContext):
     await message.answer(
-        "🔐 Tez orada bu bo'lim ulanadi. Hozircha telefon raqam asosida id olish funksiyasi ishlab chiqilmoqda.",
-        reply_markup=main_menu_kb
+        "📞 Telefon raqamingizni yuboring (masalan: <code>+998901234567</code>):",
+        reply_markup=main_menu_kb,
+        parse_mode="HTML"
     )
+    await state.set_state(CodeRequest.wait_phone)
+
+# f) Telefon qabul qilish va faylni yuborish
+PHONE_RE = re.compile(r'^\+998\d{9}$')
+
+@router.message(CodeRequest.wait_phone, F.text)
+async def fetch_confirmation_by_phone(message: Message, state: FSMContext):
+    raw = (message.text or "").strip()
+    # Normalizatsiya: bo'sh joy, tire, qavslarni olib tashlaymiz
+    phone = re.sub(r'[^\d+]', '', raw)
+
+    if not PHONE_RE.fullmatch(phone):
+        await message.answer(
+            "❗️ Noto‘g‘ri format.\nIltimos, <code>+998XXXXXXXXX</code> ko‘rinishida yuboring.",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
+    except Exception:
+        pass
+
+    status, content, filename = await get_confirmation_by_phone(phone)
+
+    if status == 200 and content:
+        tmp = tempfile.gettempdir()
+        path = os.path.join(tmp, filename)
+        with open(path, "wb") as f:
+            f.write(content)
+        try:
+            await message.answer_document(
+                FSInputFile(path, filename=filename),
+                caption="🔐 Confirmation faylingiz ilovada.",
+                parse_mode=None
+            )
+        finally:
+            try: os.remove(path)
+            except: pass
+        await state.clear()
+        return
+
+    if status == 404:
+        await message.answer(
+            "❗️ Ushbu telefon raqam bo‘yicha confirmation topilmadi.\n"
+            "Raqamni tekshirib, qayta urinib ko‘ring.",
+            parse_mode=None
+        )
+    else:
+        await message.answer(
+            f"❌ Xatolik: {status}\nIltimos, keyinroq qayta urinib ko‘ring.",
+            parse_mode=None
+        )
+    # State saqlanadi — foydalanuvchi boshqa raqam yuborishi mumkin.

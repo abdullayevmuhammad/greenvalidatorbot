@@ -5,6 +5,7 @@ from utils.file import get_download_path, safe_filename
 from utils.validators import validate_file_extension, validate_file_size
 from states.application import ApplicationForm
 from utils.api import post_applicant
+from .confirm import ask_confirmation
 
 router = Router()
 
@@ -47,8 +48,10 @@ async def handle_child_passport(message: Message, state: FSMContext):
     }
 
     # ✅ Fayllar `open()` qilinmaydi — faqat path yuboriladi
-    resp = await post_applicant(data, file_paths)
-
+    # resp = await post_applicant(data, file_paths)
+    await state.update_data(form_data=data, files=file_paths)
+    await ask_confirmation(message, state)
+    return
     if resp.status_code == 201:
         await message.answer("✅ Arizangiz muvaffaqiyatli yuborildi.")
     else:

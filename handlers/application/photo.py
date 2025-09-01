@@ -61,6 +61,6 @@ async def handle_photo_document(message: Message, state: FSMContext):
 @router.message(ApplicationForm.photo, ~F.document)
 async def require_photo_as_document(message: Message, state: FSMContext):
     await message.answer(
-        "❗️ Iltimos, rasmni **Fayl sifatida** yuboring (📎 *Attach* → *File*). "
+        "❗️ Iltimos, rasmni Fayl sifatida yuboring (📎 *Attach* → *File*). "
         "Faqat .jpg/.jpeg/.png va o‘lcham aynan 600x600 bo‘lsin."
     )

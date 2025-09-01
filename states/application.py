@@ -2,6 +2,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class ApplicationForm(StatesGroup):
+    
     full_name = State()
     passport_file = State()
     photo = State()
@@ -19,4 +20,5 @@ class ApplicationForm(StatesGroup):
     wife_passport = State()
     wife_photo = State()
     child_full_name = State()
-    child_passport = State()  
+    child_passport = State() 
+    confirm = State() 

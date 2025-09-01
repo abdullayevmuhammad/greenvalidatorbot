@@ -15,6 +15,9 @@ from .children_count import router as children_count_router
 # ✅ Yangi bolalar (farzandlar) uchun handlerlar:
 from .child_full_name import router as child_full_name_router
 from .child_passport import router as child_passport_router
+from .confirm import router as confirm_router
+
+from .get_code_by_phone import router as get_code_by_phone_router
 
 routers = [
     full_name_router,
@@ -31,7 +34,9 @@ routers = [
     wife_photo_router,
     children_count_router,
     child_full_name_router,   # ✅ Farzand ismi
-    child_passport_router,    # ✅ Farzand hujjati
+    child_passport_router, 
+    confirm_router,   # ✅ Farzand hujjati
+    get_code_by_phone_router,
 ]
 
 def register_application_handlers(dp):

@@ -4,7 +4,6 @@ from aiogram.fsm.context import FSMContext
 from utils.file import get_download_path, safe_filename
 from utils.validators import validate_file_extension, validate_file_size
 from states.application import ApplicationForm
-from utils.api import post_applicant
 from .confirm import ask_confirmation
 
 router = Router()
@@ -14,6 +13,7 @@ async def handle_child_passport(message: Message, state: FSMContext):
     file = message.document
     safe_name = safe_filename(file.file_id, file.file_name, max_length=100)
     file_path = get_download_path(safe_name)
+
     try:
         await message.bot.download(file, destination=file_path)
         validate_file_extension(safe_name)
@@ -26,40 +26,32 @@ async def handle_child_passport(message: Message, state: FSMContext):
     current_child = data.get("current_child", 1)
     children_total = data.get("children_count", 0)
 
-    # ✅ Oxirgi farzandga faylni biriktiramiz
     dependents = data.get("dependents", [])
-    if dependents:
-        dependents[-1]["passport_file"] = file_path
+
+    # ✅ Farzand ma’lumotini yangilash yoki qo‘shish
+    if len(dependents) < current_child:
+        dependents.append({
+            "full_name": data.get("child_full_name", "—"),
+            "status": "child",
+            "passport_file": file_path
+        })
+    else:
+        dependents[current_child-1]["passport_file"] = file_path
+
     await state.update_data(dependents=dependents)
 
     # 🔁 Yana farzand bo‘lsa, keyingisini so‘raymiz
     if current_child < children_total:
         next_child = current_child + 1
         await state.update_data(current_child=next_child)
-        await message.answer(f"👶 {next_child}-farzandingizning to‘liq ismini kiriting:")
         await state.set_state(ApplicationForm.child_full_name)
+        await message.answer(f"👶 {next_child}-farzandingizning to‘liq ismini kiriting:")
         return
 
-    # ✅ Barcha farzandlar tugadi — yuborishga tayyorlanamiz
-
-    file_paths = {
-        "passport_file": data.get("passport_file"),  # asosiy applicant
-        "photo_file": data.get("photo_file")
-    }
-
-    # ✅ Fayllar `open()` qilinmaydi — faqat path yuboriladi
-    # resp = await post_applicant(data, file_paths)
-    await state.update_data(form_data=data, files=file_paths)
+    # ✅ Barcha farzandlar tugadi — arizani yuborishga tayyorlanamiz
     await ask_confirmation(message, state)
-    return
-    if resp.status_code == 201:
-        await message.answer("✅ Arizangiz muvaffaqiyatli yuborildi.")
-    else:
-        await message.answer(f"❌ Xatolik: {resp.status_code}\n{resp.text}")
 
-    await state.clear()
 
-# handlers/applications/child_passport.py
 @router.message(ApplicationForm.child_passport, ~F.document)
 async def require_child_passport_as_document(message: Message, state: FSMContext):
     await message.answer(

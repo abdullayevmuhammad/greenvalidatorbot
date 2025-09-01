@@ -1,10 +1,11 @@
+# tgbot/handlers/application/confirm.py
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from states.application import ApplicationForm
 from keyboards.confirm import confirm_keyboard
-from utils.api import post_applicant
+from utils.api import post_applicant, post_dependent
 
 router = Router()
 
@@ -20,7 +21,6 @@ def _mask(s: str, keep: int = 4) -> str:
     return f"{s[:keep]}•••{s[-2:]}"
 
 def _humanize_edu(val: str) -> str:
-    # Saqlanayotgan qiymatlar bo‘yicha moslab o‘zgartiring
     mapping = {
         "secondary": "O‘rta",
         "special_secondary": "O‘rta maxsus",
@@ -31,7 +31,11 @@ def _humanize_edu(val: str) -> str:
     return mapping.get(val, val or "—")
 
 def _humanize_ms(val: str) -> str:
-    mapping = {"single": "Uylanmagan / Turmushga chiqmagan", "married": "Uylangan / Turmush qurgan", "divorced": "Ajrashgan"}
+    mapping = {
+        "single": "Uylanmagan / Turmushga chiqmagan",
+        "married": "Uylangan / Turmush qurgan",
+        "divorced": "Ajrashgan"
+    }
     return mapping.get(val, val or "—")
 
 def _build_summary(data: dict) -> str:
@@ -76,49 +80,74 @@ async def ask_confirmation(target: Message | CallbackQuery, state: FSMContext):
 @router.callback_query(ApplicationForm.confirm, F.data == "confirm_send")
 async def confirm_send(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    form_data = data.get("form_data") or data
 
-    # Tugmalarni o'chirib qo'yamiz
+    # 1) Applicant form fields
+    form_data = {
+        "full_name": data.get("full_name"),
+        "address": data.get("address"),
+        "postal_code": data.get("postal_code"),
+        "email": data.get("email") or "",
+        "education_level": data.get("education_level"),
+        "marital_status": data.get("marital_status"),
+        "children_count": int(data.get("children_count") or 0),
+        "phone_number": data.get("phone_number"),
+    }
+
+    # 2) Applicant files
+    file_paths = {}
+    if data.get("passport_file"):
+        file_paths["passport_file"] = data.get("passport_file")
+    if data.get("photo_file"):
+        file_paths["photo"] = data.get("photo_file")
+
+    # remove inline buttons
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
 
-    # Faqat JSON ma'lumotlarni yuboramiz
-    resp = await post_applicant(form_data)
+    # 3) Create applicant
+    status, body, applicant_id = await post_applicant(form_data, file_paths)
 
-    if resp.status_code == 201:
-        await callback.message.answer("✅ Arizangiz muvaffaqiyatli yuborildi.")
-        await state.clear()
+    if status in (200, 201) and applicant_id:
+        # 4) Create dependents one-by-one (if any)
+        errors = []
+        for dep in data.get("dependents", []):
+            if not isinstance(dep, dict):
+                continue
+            # ensure minimal fields
+            dep_payload = {
+                "full_name": dep.get("full_name"),
+                "status": dep.get("status"),
+                # include file paths if present in state
+            }
+            if dep.get("passport_file"):
+                dep_payload["passport_file"] = dep.get("passport_file")
+            if dep.get("photo_file"):
+                dep_payload["photo"] = dep.get("photo_file")
+
+            d_status, d_body = await post_dependent(dep_payload, applicant_id)
+            if d_status not in (200, 201):
+                errors.append({"dependent": dep_payload.get("full_name"), "status": d_status, "body": d_body})
+
+        if not errors:
+            await callback.message.answer("✅ Arizangiz muvaffaqiyatli yuborildi.")
+            await state.clear()
+        else:
+            await callback.message.answer(f"✅ Applicant yaratildi, ammo dependents yuborishda xatoliklar:\n{errors}")
     else:
-        error_text = f"❌ Xatolik: {resp.status_code}"
-        try:
-            error_data = resp.json()
-            if isinstance(error_data, dict):
-                error_details = error_data.get('detail') or error_data.get('message') or str(error_data)
-                error_text += f"\n{error_details}"
-            else:
-                error_text += f"\n{error_data}"
-        except:
-            # HTML yoki oddiy text
-            from utils.api import clean_html_response  # Yangi funksiyani import qilamiz
-            error_response = resp.text
-            clean_error = clean_html_response(error_response)
-            error_text += f"\n{clean_error[:300]}"  # 300 ta belgidan ortiq bo'lmasin
-
-        await callback.message.answer(error_text, parse_mode=None)
+        # Show backend error (body may be dict or text)
+        await callback.message.answer(f"❌ Applicant yuborishda xatolik: {status}\n{body}")
 
     await callback.answer()
 
 
 @router.callback_query(ApplicationForm.confirm, F.data == "cancel_send")
 async def cancel_send(callback: CallbackQuery, state: FSMContext):
-    # Tugmalarni olib tashlaymiz va formani boshidan boshlaymiz
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
-
     await state.clear()
     await callback.message.answer("❌ Bekor qilindi. Boshidan boshlaymiz.\n\n👤 Iltimos, to‘liq ismingizni kiriting:")
     await state.set_state(ApplicationForm.full_name)

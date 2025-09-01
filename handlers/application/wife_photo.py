@@ -15,24 +15,20 @@ async def handle_wife_photo_document(message: Message, state: FSMContext):
     file = message.document
     ext = os.path.splitext(file.file_name)[1].lower()
 
-    # Faqat rasm turlariga ruxsat
     if ext not in [".jpg", ".jpeg", ".png"]:
-        await message.answer("❌ Rasm faqat .jpg/.jpeg/.png bo‘lishi kerak. Iltimos, rasmni *Fayl sifatida* yuboring.")
+        await message.answer(
+            "❌ Rasm faqat .jpg/.jpeg/.png bo‘lishi kerak. Iltimos, rasmni *Fayl sifatida* yuboring."
+        )
         return
 
-    # Fayl nomini xavfsiz qisqartirish (≤100)
     safe_name = safe_filename(file.file_id, file.file_name, max_length=100)
     file_path = get_download_path(safe_name)
 
     try:
-        # Yuklab olish
         await message.bot.download(file, destination=file_path)
-
-        # Validatsiya: kengaytma va hajm
         validate_file_extension(safe_name)
         validate_file_size(file.file_size)
 
-        # O‘lcham: 600x600
         with Image.open(file_path) as img:
             w, h = img.size
             if (w, h) != (600, 600):
@@ -53,20 +49,28 @@ async def handle_wife_photo_document(message: Message, state: FSMContext):
     # State ga saqlaymiz
     await state.update_data(wife_photo_file=file_path)
 
-    # dependents ga qo‘shamiz
+    # dependents ro'yxatidagi wife obyektini yangilaymiz
     data = await state.get_data()
-    wife = {
-        "full_name": data.get("wife_full_name"),
-        "status": "wife",
-        "passport_file": data.get("wife_passport_file"),
-        "photo_file": file_path,
-    }
     dependents = data.get("dependents", [])
-    dependents.append(wife)
+    wife_dep = next((d for d in dependents if d.get("status") == "wife"), None)
+    if wife_dep:
+        wife_dep["photo_file"] = file_path
+    else:
+        # Agar passportdan keyin dependents ga qo‘shilmagan bo‘lsa
+        dependents.append({
+            "full_name": data.get("wife_full_name", "—"),
+            "status": "wife",
+            "passport_file": data.get("wife_passport_file"),
+            "photo_file": file_path,
+        })
+
     await state.update_data(dependents=dependents)
 
-    await message.answer("👶 Endi farzandlaringiz sonini kiriting (agar farzandingiz bo‘lmasa 0 deb yozing):")
+    await message.answer(
+        "👶 Endi farzandlaringiz sonini kiriting (agar farzandingiz bo‘lmasa 0 deb yozing):"
+    )
     await state.set_state(ApplicationForm.children_count)
+
 
 @router.message(ApplicationForm.wife_photo, ~F.document)
 async def require_wife_photo_as_document(message: Message, state: FSMContext):

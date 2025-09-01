@@ -1,9 +1,8 @@
 from aiogram import Router
-from .confirm import ask_confirmation
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from states.application import ApplicationForm
-from utils.api import post_applicant
+from .confirm import ask_confirmation
 
 router = Router()
 
@@ -16,32 +15,18 @@ async def handle_children_count(message: Message, state: FSMContext):
 
         await state.update_data(children_count=count)
 
+        data = await state.get_data()
+        dependents = data.get("dependents", [])
+
         if count > 0:
             # ➕ Farzandlar bo‘lsa, ularning ma’lumotlarini so‘rash
             await message.answer(f"👶 Iltimos, 1-farzandingizning to‘liq ismini kiriting:")
-            await state.update_data(current_child=1)
+            await state.update_data(current_child=1, dependents=dependents)
             await state.set_state(ApplicationForm.child_full_name)
-
         else:
             # ✅ Farzand yo‘q — arizani darhol yuboramiz
-            data = await state.get_data()
-
-            file_paths = {
-                "passport_file": data.get("passport_file"),
-                "photo_file": data.get("photo_file"),
-            }
-
-            # resp = await post_applicant(data, file_paths)
-
-            await state.update_data(form_data=data, files=file_paths)
+            await state.update_data(dependents=dependents)  # bo‘sh ro‘yxat
             await ask_confirmation(message, state)
-            return
-            if resp.status_code == 201:
-                await message.answer("✅ Arizangiz muvaffaqiyatli yuborildi.")
-            else:
-                await message.answer(f"❌ Xatolik: {resp.status_code}\n{resp.text}")
-
-            await state.clear()
 
     except ValueError:
         await message.answer("❌ Noto'g'ri format. Iltimos, faqat raqam kiriting (masalan: 2)")

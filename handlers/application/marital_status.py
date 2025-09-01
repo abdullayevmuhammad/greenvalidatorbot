@@ -3,7 +3,6 @@ from aiogram import Router
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 from states.application import ApplicationForm
-from utils.api import post_applicant
 from .confirm import ask_confirmation
 
 router = Router()
@@ -27,7 +26,9 @@ async def handle_marital(callback: CallbackQuery, state: FSMContext):
         await state.set_state(ApplicationForm.wife_full_name)
 
     elif status == "divorced":
-        await callback.message.answer("👶 Farzandlaringiz sonini kiriting (agar farzandingiz bo'lmasa 0 deb yozing):")
+        await callback.message.answer(
+            "👶 Farzandlaringiz sonini kiriting (agar farzandingiz bo'lmasa 0 deb yozing):"
+        )
         await state.set_state(ApplicationForm.children_count)
 
     else:  # single
@@ -43,10 +44,8 @@ async def handle_marital(callback: CallbackQuery, state: FSMContext):
             "marital_status": status,
             "children_count": 0,  # Raqam sifatida
             "phone_number": data["phone_number"],
-            "dependents": []
+            "dependents": [],  # Single bo'lsa dependents yo'q
         }
 
         await state.update_data(form_data=form_data)
         await ask_confirmation(callback, state)
-
-    await callback.answer()

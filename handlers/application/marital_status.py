@@ -1,4 +1,4 @@
-# handlers/applications/marital_status.py
+# tgbot/handlers/applcation/marital_status.py
 from aiogram import Router
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -22,7 +22,7 @@ async def handle_marital(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete_reply_markup()
 
     if status == "married":
-        await callback.message.answer("Turmush o'rtog'ingizning to'liq ismini kiriting:")
+        await callback.message.answer("Turmush o'rtog'ingizning to'liq ismini kiriting (F. I. Sh):")
         await state.set_state(ApplicationForm.wife_full_name)
 
     elif status == "divorced":

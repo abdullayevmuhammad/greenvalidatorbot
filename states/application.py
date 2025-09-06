@@ -21,4 +21,5 @@ class ApplicationForm(StatesGroup):
     wife_photo = State()
     child_full_name = State()
     child_passport = State() 
-    confirm = State() 
+    confirm = State()
+    child_photo = State()

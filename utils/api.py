@@ -6,7 +6,9 @@ import httpx
 from urllib.parse import urlencode, unquote
 import json
 
-from config import API_APPLICANTS_URL, API_TOKEN
+from config import API_APPLICANTS_URL, API_TOKEN, BASE_URL
+
+
 
 # allowed content magic (for file downloads)
 ALLOWED = {
@@ -23,6 +25,7 @@ def _auth_headers():
     if API_TOKEN:
         h["Authorization"] = f"Token {API_TOKEN}"
     return h
+
 
 
 def _looks_like_html(data: bytes) -> bool:
@@ -60,108 +63,154 @@ def _safe_filename_from_headers(headers, fallback_basename: str, desired_ext: st
 API_ROOT = API_APPLICANTS_URL.rstrip('/').rsplit('/', 1)[0]   # e.g. .../api
 DEPENDENTS_URL = f"{API_ROOT}/dependents/"
 
-
-# ----------------- POST APPLICANT (with applicant files) -----------------
-async def post_applicant(form_data: dict, file_paths: dict):
+# tgbot/utils/api.py
+async def post_applicant(data: dict, files: dict = None):
     """
-    Returns: (status_code:int, body: dict|str, applicant_id:int|None)
-    form_data: plain fields (strings/ints)
-    file_paths: {"passport_file": "/tmp/p.pdf", "photo": "/tmp/photo.jpg"}  (paths optional)
+    Applicant ma'lumotlarini serverga yuborish
     """
-    opened = []
-    files = {}
+    url = f"{BASE_URL}/applicants/"
 
-    try:
-        # passport_file
-        p = file_paths.get("passport_file")
-        if p:
-            f = open(p, "rb")
-            opened.append(f)
-            mime, _ = mimetypes.guess_type(p)
-            files["passport_file"] = (os.path.basename(p), f, mime or "application/octet-stream")
-
-        # photo (backend field is 'photo')
-        ph = file_paths.get("photo") or file_paths.get("photo_file")
-        if ph:
-            f = open(ph, "rb")
-            opened.append(f)
-            mime, _ = mimetypes.guess_type(ph)
-            files["photo"] = (os.path.basename(ph), f, mime or "application/octet-stream")
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(API_APPLICANTS_URL, data=form_data, files=files, headers=_auth_headers())
-
-        try:
-            body = resp.json()
-        except Exception:
-            body = resp.text
-
-        applicant_id = None
-        if resp.status_code in (200, 201) and isinstance(body, dict):
-            applicant_id = body.get("id")
-
-        return resp.status_code, body, applicant_id
-
-    except Exception as e:
-        return 500, str(e), None
-
-    finally:
-        for f in opened:
-            try:
-                f.close()
-            except:
-                pass
-
-
-# ----------------- POST DEPENDENT (with optional files) -----------------
-async def post_dependent(dep: dict, applicant_id: int):
-    """
-    dep: {"full_name":..., "status":..., "passport_file": path_or_None, "photo": path_or_None }
-    Returns: (status_code:int, body: dict|str)
-    """
-    opened = []
-    files = {}
-    data = {
-        "applicant": str(applicant_id),
-        "full_name": dep.get("full_name", ""),
-        "status": dep.get("status", ""),
+    headers = {
+        "Accept": "application/json",
     }
 
+    if API_TOKEN:
+        headers["Authorization"] = f"Token {API_TOKEN}"
+
     try:
-        p = dep.get("passport_file")
-        if p:
-            f = open(p, "rb")
-            opened.append(f)
-            mime, _ = mimetypes.guess_type(p)
-            files["passport_file"] = (os.path.basename(p), f, mime or "application/octet-stream")
+        # Fayllarni ochib, httpx uchun tayyorlaymiz
+        files_dict = {}
+        opened_files = []
 
-        ph = dep.get("photo") or dep.get("photo_file")
-        if ph:
-            f = open(ph, "rb")
-            opened.append(f)
-            mime, _ = mimetypes.guess_type(ph)
-            files["photo"] = (os.path.basename(ph), f, mime or "application/octet-stream")
+        if files:
+            for key, file_path in files.items():
+                if file_path and os.path.exists(file_path):
+                    try:
+                        file = open(file_path, 'rb')
+                        # Serverga mos fayl nomlari
+                        if key == "photo_file":
+                            files_dict["photo"] = (os.path.basename(file_path), file, 'image/jpeg')
+                        elif key == "passport_file":
+                            files_dict["passport_file"] = (os.path.basename(file_path), file, 'application/octet-stream')
+                        else:
+                            files_dict[key] = (os.path.basename(file_path), file, 'application/octet-stream')
+                        opened_files.append(file)
+                    except Exception as e:
+                        print(f"⚠️ Faylni ochishda xatolik: {file_path}, {e}")
+                        continue
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(DEPENDENTS_URL, data=data, files=files, headers=_auth_headers())
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if files_dict:
+                print(f"📤 Fayllar yuborilmoqda: {list(files_dict.keys())}")
+                response = await client.post(
+                    url,
+                    data=data,
+                    files=files_dict,
+                    headers=headers
+                )
+            else:
+                headers["Content-Type"] = "application/json"
+                response = await client.post(
+                    url,
+                    json=data,
+                    headers=headers
+                )
 
-        try:
-            body = resp.json()
-        except Exception:
-            body = resp.text
+            # Fayllarni yopamiz
+            for file in opened_files:
+                try:
+                    file.close()
+                except:
+                    pass
 
-        return resp.status_code, body
+            # Applicant ID ni olish
+            applicant_id = None
+            try:
+                response_data = response.json()
+                if response.status_code in (200, 201) and "id" in response_data:
+                    applicant_id = response_data["id"]
+            except:
+                response_data = response.text
+
+            return response.status_code, response_data, applicant_id
 
     except Exception as e:
-        return 500, str(e)
-
-    finally:
-        for f in opened:
+        print(f"Applicant yuborishda xatolik: {e}")
+        # Fayllarni yopishni unutmaymiz
+        for file in opened_files:
             try:
-                f.close()
+                file.close()
             except:
                 pass
+        return 500, {"error": str(e)}, None
 
+async def post_dependent(dependent_data, applicant_id, files=None):
+    """
+    Yangi dependent yaratish uchun API funksiya
+    """
+    url = f"{BASE_URL}/dependents/"
+
+    headers = {
+        "Accept": "application/json",
+    }
+
+    if API_TOKEN:
+        headers["Authorization"] = f"Token {API_TOKEN}"
+
+    try:
+        # Ma'lumotlarni form-data sifatida yuboramiz
+        form_data = {
+            "applicant": applicant_id,
+            "full_name": dependent_data.get("full_name", ""),
+            "status": dependent_data.get("status", "child"),
+        }
+
+        # Fayllarni ochib, httpx uchun tayyorlaymiz
+        files_dict = {}
+        opened_files = []
+
+        if files:
+            for key, file_path in files.items():
+                if file_path and os.path.exists(file_path):
+                    file = open(file_path, 'rb')
+                    # Serverdagi field nomlariga mos keladigan keylardan foydalanish
+                    if key == "passport_file":
+                        files_dict["passport_file"] = (os.path.basename(file_path), file, 'application/octet-stream')
+                    elif key == "photo_file":
+                        files_dict["photo"] = (os.path.basename(file_path), file, 'image/jpeg')  # photo deb yuborish
+                    opened_files.append(file)
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if files_dict:
+                response = await client.post(
+                    url,
+                    data=form_data,
+                    files=files_dict,
+                    headers=headers
+                )
+            else:
+                headers["Content-Type"] = "application/json"
+                response = await client.post(
+                    url,
+                    json=form_data,
+                    headers=headers
+                )
+
+            # Fayllarni yopamiz
+            for file in opened_files:
+                file.close()
+
+            return response.status_code, response.json()
+
+    except Exception as e:
+        print(f"Dependent yuborishda xatolik: {e}")
+        # Fayllarni yopishni unutmaymiz
+        for file in opened_files:
+            try:
+                file.close()
+            except:
+                pass
+        return 500, {"error": str(e)}
 
 # ----------------- phone_exists and get_confirmation_by_phone (keeps previous behavior) -----------------
 async def phone_exists(phone: str) -> tuple[int, bool | None]:
@@ -191,50 +240,26 @@ async def phone_exists(phone: str) -> tuple[int, bool | None]:
 
     return resp.status_code, None
 
-
 async def get_confirmation_by_phone(phone: str):
-    qs = urlencode({"phone": phone})
-    url = f"{API_APPLICANTS_URL}/confirmation/by-phone/?{qs}"
+    url = f"{BASE_URL}/applicants/confirmation/by-phone/"
 
-    headers = {
-        **_auth_headers(),
-        "Accept": "application/pdf, image/png, image/jpeg, application/octet-stream",
-    }
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(url, params={"phone": phone}, headers=_auth_headers())
+        except httpx.RequestError as e:
+            print(f"[get_confirmation_by_phone] HTTP error: {e}")
+            return 500, None
 
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
-        resp = await client.get(url, headers=headers)
-
-    if resp.status_code in REDIRECT_CODES:
-        return 401, None, None
-    if resp.status_code in (401, 403, 404):
-        return resp.status_code, None, None
     if resp.status_code != 200:
-        return resp.status_code, None, None
+        return resp.status_code, None
 
-    body = resp.content or b""
-    if not body or _looks_like_html(body):
-        return 415, None, None
+    try:
+        data = resp.json()
+    except ValueError:
+        print("[get_confirmation_by_phone] Bad JSON:", resp.text[:200])
+        return 502, None
 
-    ctype = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
-    ok = False
-    ext = None
-
-    if ctype in ALLOWED:
-        ok = body.startswith(ALLOWED[ctype]["magic"])
-        ext = ALLOWED[ctype]["ext"] if ok else None
-
-    if not ok:
-        inferred, inf_ext = _infer_type_by_magic(body)
-        if inferred:
-            ctype, ext, ok = inferred, inf_ext, True
-
-    if not ok or not ext:
-        return 415, None, None
-
-    filename = _safe_filename_from_headers(
-        resp.headers, fallback_basename=f"confirmation_{phone}", desired_ext=ext
-    )
-    return 200, body, filename
+    return 200, data
 
 
 def clean_html_response(text: str) -> str:

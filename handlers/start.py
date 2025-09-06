@@ -64,7 +64,15 @@ Farzandlar soni – agar N > 0 bo‘lsa, har biri uchun ism va pasport/tug‘ilg
 
 🧾 Confirmation kod – telefon raqami orqali tekshiruv ulanadi.
 
-▶️ Boshlash uchun — 📝 Ariza yuborish tugmasini bosing."""
+▶️ Boshlash uchun — 📝 Ariza yuborish tugmasini bosing.
+
+Ariza uchun narx quyidagicha taqsimlanadi:
+Bo'ydoqlar/Yolg'izlar uchun: 100 000 so'm
+Oilalilar uchun: 150 000 so'm
+
+To'lov chekini adminga yuboring.
+@GC_helper_admin
+"""
     )
     await message.answer(text=text, reply_markup=main_menu_kb)
 
@@ -79,7 +87,7 @@ Green Card — bu AQShda doimiy yashash va ishlash huquqini beradigan karta. Har
 
 Har yili oktyabr oyida rasmiy ariza qabul qilish boshlanadi (taxminan 1 oy davom etadi).
 
-Ariza faqat rasmiy sayt orqali topshiriladi (hech qanday to‘lov olinmaydi).
+Ariza faqat rasmiy sayt orqali topshiriladi.
 
 Faqat bitta ariza topshirish mumkin — ko‘p marta topshirish diskvalifikatsiya qiladi.
 
@@ -87,14 +95,14 @@ Fotosurat va shaxsiy ma’lumotlar qat’iy talablar bo‘yicha topshiriladi.
 
 Natijalar odatda keyingi yil may oyida e’lon qilinadi.
 
-ℹ️ Ushbu bot — rasmiy ariza topshirish vositasi emas. U sizning ma’lumotlaringizni tayyorlab, rasmiy talablarga mos formatda jamlaydi."""
+ℹ️ Ushbu bot — rasmiy ariza topshirish vositasi emas. U sizning ma’lumotlaringizni tayyorlab, rasmiy talablarga mos formatda jamlaydi. Va adminlar tomonidan rasmiy saytga ariza tayyorlanadi"""
     await message.answer(text=text, reply_markup=main_menu_kb)
 
 # c) Admin bilan bog'lanish
 @router.message(F.text == MAIN_MENU_BUTTONS["contact_admin"])
 async def contact_admin(message: Message):
     await message.answer(
-        "Admin bilan bog'lanish: @Ozoddeee\nTelefon: +998 90 799 79 07",
+        "Admin bilan bog'lanish: @GC_helper_admin\nTelefon: +998 90 799 79 07 | +998 77 501 45 65",
         reply_markup=main_menu_kb
     )
 
@@ -117,10 +125,48 @@ async def ask_phone(message: Message, state: FSMContext):
 # f) Telefon qabul qilish va faylni yuborish
 PHONE_RE = re.compile(r'^\+998\d{9}$')
 
+
+
+import os
+import httpx
+from urllib.parse import urlparse
+from aiogram.types import FSInputFile
+
+async def send_confirmation_file(bot, chat_id, file_url, filename=None):
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(file_url)
+            resp.raise_for_status()
+
+        # URL dan kengaytmani olish
+        parsed = urlparse(file_url)
+        ext = os.path.splitext(parsed.path)[1]  # masalan: ".jpg", ".png", ".pdf"
+
+        if not ext:  # kengaytma topilmasa default pdf
+            ext = ".pdf"
+
+        # filename foydalanuvchidan kelgan bo‘lsa ishlatamiz, bo‘lmasa default
+        if not filename:
+            filename = f"confirmation{ext}"
+        elif not filename.endswith(ext):
+            filename = f"{filename}{ext}"
+
+        os.makedirs("temp", exist_ok=True)
+        tmp_path = os.path.join("temp", filename)
+
+        with open(tmp_path, "wb") as f:
+            f.write(resp.content)
+
+        await bot.send_document(chat_id, FSInputFile(tmp_path))
+
+        os.remove(tmp_path)
+
+    except Exception as e:
+        await bot.send_message(chat_id, f"⚠️ Faylni yuborishda xatolik: {e}")
+
 @router.message(CodeRequest.wait_phone, F.text)
 async def fetch_confirmation_by_phone(message: Message, state: FSMContext):
     raw = (message.text or "").strip()
-    # Normalizatsiya: bo'sh joy, tire, qavslarni olib tashlaymiz
     phone = re.sub(r'[^\d+]', '', raw)
 
     if not PHONE_RE.fullmatch(phone):
@@ -131,38 +177,62 @@ async def fetch_confirmation_by_phone(message: Message, state: FSMContext):
         return
 
     try:
-        await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
+        await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
     except Exception:
         pass
 
-    status, content, filename = await get_confirmation_by_phone(phone)
+    status, data = await get_confirmation_by_phone(phone)
 
-    if status == 200 and content:
-        tmp = tempfile.gettempdir()
-        path = os.path.join(tmp, filename)
-        with open(path, "wb") as f:
-            f.write(content)
-        try:
-            await message.answer_document(
-                FSInputFile(path, filename=filename),
-                caption="🔐 Confirmation faylingiz ilovada.",
-                parse_mode=None
-            )
-        finally:
-            try: os.remove(path)
-            except: pass
+    # 🔹 404 uchun alohida xabar
+    if status == 404:
+        await message.answer("❌ Ushbu raqam bo‘yicha ariza topilmadi.")
         await state.clear()
         return
 
-    if status == 404:
-        await message.answer(
-            "❗️ Ushbu telefon raqam bo‘yicha confirmation topilmadi.\n"
-            "Raqamni tekshirib, qayta urinib ko‘ring.",
-            parse_mode=None
+    if status != 200 or not data:
+        await message.answer(f"❌ Serverda xatolik: {status}\nIltimos, keyinroq urinib ko‘ring.")
+        return
+
+    applicants = data.get("applicants", [])
+    if not applicants:
+        await message.answer("❌ Ushbu raqamga bog‘liq applicant topilmadi.")
+        return
+
+    # Har bir applicantni chiqaramiz
+    for app in applicants:
+        text = (
+            f"👤 <b>{app.get('full_name')}</b>\n"
+            f"📍 Manzil: {app.get('address')}\n"
+            f"🏷️ Pochta kodi: {app.get('postal_code')}\n"
+            f"📞 Tel: {app.get('phone_number')}\n"
+            f"🎓 Ta'lim: {app.get('education_level')}\n"
+            f"💍 Oilaviy holati: {app.get('marital_status')}\n"
+            f"👶 Farzandlar soni: {app.get('children_count')} ta"
         )
+        await message.answer(text, parse_mode="HTML")
+
+        confirmation_file = app.get("confirmation_file")
+        if confirmation_file:
+            try:
+                await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
+                await send_confirmation_file(
+                    message.bot,
+                    message.chat.id,
+                    confirmation_file,
+                    filename=os.path.basename(urlparse(confirmation_file).path)
+                )
+            except Exception as e:
+                await message.answer(f"⚠️ Faylni yuborishda xatolik: {e}")
+
+        else:
+            await message.answer("Fayl mavjud emas")
+
+    await state.clear()
+
+@router.message(F.text == "/cancel")
+async def cancel_handler(message: Message, state: FSMContext):
+    if await state.get_state() is not None:
+        await state.clear()
+        await message.answer("✅ Amaliyot bekor qilindi.")
     else:
-        await message.answer(
-            f"❌ Xatolik: {status}\nIltimos, keyinroq qayta urinib ko‘ring.",
-            parse_mode=None
-        )
-    # State saqlanadi — foydalanuvchi boshqa raqam yuborishi mumkin.
+        await message.answer("ℹ️ Hozircha hech qanday aktiv amaliyot yo‘q.")

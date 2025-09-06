@@ -1,3 +1,4 @@
+# tgbot/handlers/application/child_passport.py
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
@@ -8,6 +9,7 @@ from .confirm import ask_confirmation
 
 router = Router()
 
+# tgbot/handlers/application/child_passport.py
 @router.message(ApplicationForm.child_passport, F.document)
 async def handle_child_passport(message: Message, state: FSMContext):
     file = message.document
@@ -19,42 +21,45 @@ async def handle_child_passport(message: Message, state: FSMContext):
         validate_file_extension(safe_name)
         validate_file_size(file.file_size)
     except Exception:
-        await message.answer("❌ Fayl noto‘g‘ri. Faqat PDF, JPG, PNG (2MB gacha) yuboring.")
+        await message.answer("❌ Fayl noto'g'ri. Faqat PDF, JPG, PNG (2MB gacha) yuboring.")
         return
 
     data = await state.get_data()
     current_child = data.get("current_child", 1)
     children_total = data.get("children_count", 0)
-
     dependents = data.get("dependents", [])
 
-    # ✅ Farzand ma’lumotini yangilash yoki qo‘shish
-    if len(dependents) < current_child:
+    # Oxirgi qo'shilgan farzandni topamiz (current_child indeksiga asosan)
+    child_index = None
+    child_count = 0
+    for i, dep in enumerate(dependents):
+        if dep.get("status") == "child":
+            child_count += 1
+            if child_count == current_child:
+                child_index = i
+                break
+
+    if child_index is not None:
+        # Farzand ma'lumotlarini yangilaymiz
+        dependents[child_index]["passport_file"] = file_path
+    else:
+        # Yangi farzand qo'shamiz
         dependents.append({
-            "full_name": data.get("child_full_name", "—"),
+            "full_name": data.get(f"child_{current_child}_name", f"Farzand {current_child}"),
             "status": "child",
+            "photo_file": data.get(f"child_{current_child}_photo"),
             "passport_file": file_path
         })
-    else:
-        dependents[current_child-1]["passport_file"] = file_path
 
-    await state.update_data(dependents=dependents)
+    await state.update_data({
+        "dependents": dependents,
+        f"child_{current_child}_passport": file_path
+    })
 
-    # 🔁 Yana farzand bo‘lsa, keyingisini so‘raymiz
+    # Keyingi farzand yoki tasdiqlash
     if current_child < children_total:
-        next_child = current_child + 1
-        await state.update_data(current_child=next_child)
+        await state.update_data({"current_child": current_child + 1})
+        await message.answer(f"👶 {current_child + 1}-farzandingizning to'liq ismini kiriting:")
         await state.set_state(ApplicationForm.child_full_name)
-        await message.answer(f"👶 {next_child}-farzandingizning to‘liq ismini kiriting:")
-        return
-
-    # ✅ Barcha farzandlar tugadi — arizani yuborishga tayyorlanamiz
-    await ask_confirmation(message, state)
-
-
-@router.message(ApplicationForm.child_passport, ~F.document)
-async def require_child_passport_as_document(message: Message, state: FSMContext):
-    await message.answer(
-        "❗️ Iltimos, farzandingiz pasportini **Fayl sifatida** yuboring (📎 *Attach* → *File*). "
-        "Ruxsat etilgan turlar: .pdf, .jpg, .jpeg, .png. Hajm: 2MB gacha."
-    )
+    else:
+        await ask_confirmation(message, state)

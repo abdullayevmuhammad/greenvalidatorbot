@@ -1,3 +1,4 @@
+# tgbot/handlers/applcation/wife_passport.py
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
@@ -7,6 +8,7 @@ from states.application import ApplicationForm
 
 router = Router()
 
+# tgbot/handlers/application/wife_passport.py
 @router.message(ApplicationForm.wife_passport, F.document)
 async def handle_wife_passport(message: Message, state: FSMContext):
     file = message.document
@@ -23,33 +25,35 @@ async def handle_wife_passport(message: Message, state: FSMContext):
         )
         return
 
-    # dependents ro'yxatiga faylni qo'shish
     data = await state.get_data()
     dependents = data.get("dependents", [])
-    wife_dep = next((d for d in dependents if d.get("status") == "wife"), None)
+    wife_name = data.get("wife_full_name", "Turmush o'rtog'i")
 
-    if wife_dep:
-        wife_dep["passport_file"] = file_path
+    # Xotin ma'lumotlarini yangilash
+    wife_index = None
+    for i, dep in enumerate(dependents):
+        if dep.get("status") == "wife":
+            wife_index = i
+            break
+
+    if wife_index is not None:
+        # Xotin allaqachon mavjud, yangilaymiz
+        dependents[wife_index]["passport_file"] = file_path
     else:
-        # Agar wife hali qo‘shilmagan bo‘lsa
+        # Yangi xotin qo'shamiz
         dependents.append({
-            "full_name": data.get("wife_full_name", "—"),
+            "full_name": wife_name,
             "status": "wife",
             "passport_file": file_path,
             "photo_file": None
         })
 
-    await state.update_data(dependents=dependents)
+    await state.update_data(
+        wife_passport_file=file_path,
+        dependents=dependents
+    )
 
     await message.answer(
-        "📸 Turmush o'rtog'ingizning fotosuratini yuboring (JPG, PNG, 2MB gacha):"
+        "📸 Turmush o'rtog'ingizning 600x600 hajmdagi fotosuratini yuboring (JPG, PNG, 2MB gacha):"
     )
     await state.set_state(ApplicationForm.wife_photo)
-
-
-@router.message(ApplicationForm.wife_passport, ~F.document)
-async def require_wife_passport_as_document(message: Message, state: FSMContext):
-    await message.answer(
-        "❗️ Iltimos, turmush o‘rtog‘ingiz pasportini **Fayl sifatida** yuboring (📎 *Attach* → *File*). "
-        "Ruxsat etilgan turlar: .pdf, .jpg, .jpeg, .png. Hajm: 2MB gacha."
-    )

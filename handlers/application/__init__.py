@@ -1,3 +1,4 @@
+# tgbot/handlers/applcation/__init__.py
 from .full_name import router as full_name_router
 from .passport import router as passport_router
 from .photo import router as photo_router
@@ -11,6 +12,7 @@ from .wife_full_name import router as wife_full_name_router
 from .wife_passport import router as wife_passport_router
 from .wife_photo import router as wife_photo_router
 from .children_count import router as children_count_router
+from .children_photo  import router as child_photo_router
 
 # ✅ Yangi bolalar (farzandlar) uchun handlerlar:
 from .child_full_name import router as child_full_name_router
@@ -34,7 +36,8 @@ routers = [
     wife_photo_router,
     children_count_router,
     child_full_name_router,   # ✅ Farzand ismi
-    child_passport_router, 
+    child_photo_router,
+    child_passport_router,
     confirm_router,   # ✅ Farzand hujjati
     get_code_by_phone_router,
 ]

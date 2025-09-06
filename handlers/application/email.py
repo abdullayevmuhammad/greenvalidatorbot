@@ -1,4 +1,4 @@
-# handlers/applications/email.py
+# tgbot/handlers/applcation/email.py
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext

@@ -15,3 +15,10 @@ def safe_filename(file_id: str, file_name: str, max_length: int = 100):
     if len(base) > limit:
         base = base[:limit]
     return f"{base}{ext}"
+
+# utils/file.py fayliga qo'shing
+import os
+
+def check_file_exists(file_path):
+    """Fayl mavjudligini tekshirish"""
+    return file_path and os.path.exists(file_path) and os.path.isfile(file_path)

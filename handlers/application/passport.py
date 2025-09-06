@@ -1,3 +1,4 @@
+# tgbot/handlers/applcation/passport.py
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
@@ -27,7 +28,7 @@ async def get_passport_document(message: Message, state: FSMContext):
         return
 
     await state.update_data(passport_file=file_path)
-    await message.answer("🖼 Endi 600x600 o‘lchamdagi fotosurat yuboring:")
+    await message.answer("🖼 Endi 600x600 o‘lchamdagi fotosurat yuboring (shu kunlarda tushgan yangi suratingiz bo'lishi kerak):")
     await state.set_state(ApplicationForm.photo)
 
 # handlers/applications/passport.py

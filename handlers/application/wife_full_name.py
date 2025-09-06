@@ -6,6 +6,7 @@ from states.application import ApplicationForm
 
 router = Router()
 
+# handlers/application/wife_full_name.py
 @router.message(ApplicationForm.wife_full_name)
 async def handle_wife_full_name(message: Message, state: FSMContext):
     wife_name = message.text.strip()
@@ -13,23 +14,33 @@ async def handle_wife_full_name(message: Message, state: FSMContext):
         await message.answer("❌ Iltimos, to'liq ismni kiriting.")
         return
 
-    # dependents ro'yxatini yangilash
+    # Avvalgi dependents ro'yxatini olish
     data = await state.get_data()
     dependents = data.get("dependents", [])
 
-    # agar wife hali qo'shilmagan bo'lsa, qo'shamiz
-    wife_dep = next((d for d in dependents if d.get("status") == "wife"), None)
-    if not wife_dep:
+    # Xotin ma'lumotlarini yangilash yoki qo'shish
+    wife_index = None
+    for i, dep in enumerate(dependents):
+        if dep.get("status") == "wife":
+            wife_index = i
+            break
+
+    if wife_index is not None:
+        # Xotin allaqachon mavjud, yangilaymiz
+        dependents[wife_index]["full_name"] = wife_name
+    else:
+        # Yangi xotin qo'shamiz
         dependents.append({
             "full_name": wife_name,
             "status": "wife",
             "passport_file": None,
             "photo_file": None
         })
-    else:
-        wife_dep["full_name"] = wife_name
 
-    await state.update_data(dependents=dependents)
+    await state.update_data(
+        wife_full_name=wife_name,
+        dependents=dependents
+    )
 
     await message.answer(
         "📄 Turmush o'rtog'ingizning pasport faylini yuboring (JPG, PNG yoki PDF, 2MB gacha):"
